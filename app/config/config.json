@@ -1,0 +1,29 @@
+{
+    "Material": {
+        "AcrylicBlurRadius": 15
+    },
+    "Update": {
+        "CheckUpdateAtStartUp": true
+    },
+    "MainWindow": {
+        "DpiScale": "Auto",
+        "Language": "Auto",
+        "MicaEnabled": true
+    },
+    "Folders": {
+        "Gallery": "D:/projects/pyqt6/project/app/view/resource/gallery",
+        "LocalMusic": []
+    },
+    "Files": {
+        "Image Path": "D:/projects/pyqt6/project/1.jpg",
+        "ModelPath": "D:/projects/pyqt6/project/app/models/best.pt",
+        "Video Path": "C:/Users/abhar/Videos/Captures/GTA.mp4"
+    },
+    "Models": {
+        "Model Type": "yolov8"
+    },
+    "QFluentWidgets": {
+        "ThemeColor": "#ff009faa",
+        "ThemeMode": "Dark"
+    }
+}

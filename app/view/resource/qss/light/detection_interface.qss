@@ -1,0 +1,13 @@
+DetectionInterface, #scrollWidget {
+    background-color: transparent;
+}
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QLabel#detectionLabel {
+    font: 33px 'Microsoft YaHei Light';
+    background-color: transparent;
+}

@@ -1,0 +1,14 @@
+ReIdInterface, #scrollWidget {
+    background-color: transparent;
+}
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QLabel#reidLabel {
+    font: 33px 'Microsoft YaHei Light';
+    background-color: transparent;
+}
+
