@@ -47,11 +47,7 @@ Main dependencies include:
 Place the following model files in the `app/models/` directory:
 
 #### Detection Models
-- `best.pt` - YOLOv5 model weights
-- `bestyolo10n.pt` - YOLOv8 model weights
-- `bestyolo11n.pt` - YOLOv9 model weights
-- `yolo5_azhdarPour_best.pt` - Custom YOLOv5 model
-- `yolov5s_best.pt` - YOLOv5s model weights
+-  YOLOv models weights
 
 #### ReID Models
 - `net_119.pth` - FSRA model weights for person re-identification
