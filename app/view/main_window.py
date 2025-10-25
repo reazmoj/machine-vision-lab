@@ -19,6 +19,7 @@ from .detection_interface import DetectionInterface
 from .reid_interface import ReIdInterface
 from .gallery_interface import GalleryInterface
 from .setting_interface import SettingInterface
+from .data_management_interface import DataManagementInterface
 # from .signUp_interface import SigUpInterface
 
 # enable dpi scale
@@ -46,7 +47,7 @@ class MainWindow(FluentWindow):
         self.homeInterface = HomePage(self)
         self.detectionInterface = DetectionInterface(self)
         self.reidentificationInterface = ReIdInterface(self)
-
+        self.dataManagementInterface = DataManagementInterface(self)
         self.settingInterface = SettingInterface(self)
 
         # enable acrylic effect
@@ -76,6 +77,7 @@ class MainWindow(FluentWindow):
         pos = NavigationItemPosition.SCROLL
         self.addSubInterface(self.detectionInterface, FIF.ZOOM, self.tr("Object Detection"), pos)
         self.addSubInterface(self.reidentificationInterface, FIF.ALBUM, self.tr("ReIdentification"), pos)
+        self.addSubInterface(self.dataManagementInterface, FIF.FOLDER, self.tr("Data Management"), pos)
 
         # add custom widget to bottom
         self.addSubInterface(self.settingInterface, FIF.SETTING, self.tr('Settings'), NavigationItemPosition.BOTTOM)
