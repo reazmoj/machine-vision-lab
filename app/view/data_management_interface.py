@@ -1,169 +1,254 @@
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                           QLabel, QFileDialog, QScrollArea, QMessageBox)
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
+    QMessageBox, QListWidget, QListWidgetItem, QSlider, QAbstractItemView, QComboBox
+)
+from qfluentwidgets import PushButton
+from PyQt6.QtGui import QPixmap, QIcon
 import os
 import glob
 from pathlib import Path
+import re
 from ..common.style_sheet import StyleSheet
 
-class ImageThumbnail(QWidget):
-    clicked = pyqtSignal(bool)
-    
-    def __init__(self, image_path, parent=None):
-        super().__init__(parent)
-        self.image_path = image_path
-        self.is_selected = False
-        self.initUI()
-        
-    def initUI(self):
-        layout = QVBoxLayout()
-        
-        # Image label
-        self.image_label = QLabel()
-        pixmap = QPixmap(self.image_path)
-        scaled_pixmap = pixmap.scaled(QSize(150, 150), Qt.AspectRatioMode.KeepAspectRatio)
-        self.image_label.setPixmap(scaled_pixmap)
-        
-        # Filename label
-        filename = os.path.basename(self.image_path)
-        name_label = QLabel(filename)
-        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        layout.addWidget(self.image_label)
-        layout.addWidget(name_label)
-        self.setLayout(layout)
-        
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.is_selected = not self.is_selected
-            self.setStyleSheet(
-                "ImageThumbnail { background-color: %s; border: 2px solid %s }" 
-                % ("#e0e0e0" if self.is_selected else "transparent",
-                   "#2196F3" if self.is_selected else "transparent")
-            )
-            self.clicked.emit(self.is_selected)
 
 class DataManagementInterface(QWidget):
+    """A two-pane data manager: left is a thumbnail list, right is a slideshow viewer.
+
+    Features:
+    - Select folder to load images
+    - Thumbnail list with multi-selection (Ctrl/Shift)
+    - Viewer with prev/next and slider
+    - View mode: All images or Selected images
+    - Delete selected images and all related files that share the same identifier
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName('dataManagementInterface')  # required by qfluentwidgets
+
         self.current_directory = ""
-        self.selected_images = set()
+        self.image_list = []  # ordered list of image paths
+
         self.initUI()
-        
+
     def initUI(self):
-        layout = QVBoxLayout()
-        
+        root = QVBoxLayout(self)
+
         # Top controls
-        controls_layout = QHBoxLayout()
-        
-        self.select_folder_btn = QPushButton("Select Folder")
+        top = QHBoxLayout()
+        self.select_folder_btn = PushButton(self.tr("Select Folder"), self)
         self.select_folder_btn.clicked.connect(self.selectFolder)
-        
-        self.delete_selected_btn = QPushButton("Delete Selected")
+
+        self.view_mode = QComboBox()
+        self.view_mode.addItems(["All Images", "Selected Images"])
+        self.view_mode.currentIndexChanged.connect(self.onViewModeChanged)
+
+        self.delete_selected_btn = PushButton(self.tr("Delete Selected"), self)
         self.delete_selected_btn.clicked.connect(self.deleteSelected)
         self.delete_selected_btn.setEnabled(False)
-        
-        controls_layout.addWidget(self.select_folder_btn)
-        controls_layout.addWidget(self.delete_selected_btn)
-        controls_layout.addStretch()
-        
-        # Scroll area for images
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
-        # Container for image thumbnails
-        self.image_container = QWidget()
-        self.image_layout = QHBoxLayout()
-        self.image_layout.setSpacing(10)
-        self.image_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.image_container.setLayout(self.image_layout)
-        
-        self.scroll_area.setWidget(self.image_container)
-        
-        layout.addLayout(controls_layout)
-        layout.addWidget(self.scroll_area)
-        
-        self.setLayout(layout)
+
+        top.addWidget(self.select_folder_btn)
+        top.addWidget(self.view_mode)
+        top.addStretch()
+        top.addWidget(self.delete_selected_btn)
+
+        # Main area: thumbnails on left, viewer on right
+        main = QHBoxLayout()
+
+        # Thumbnail list
+        self.thumb_list = QListWidget()
+        self.thumb_list.setObjectName('thumbnailList')
+        self.thumb_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.thumb_list.setIconSize(QSize(160, 120))
+        self.thumb_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.thumb_list.setMovement(QListWidget.Movement.Static)
+        self.thumb_list.setSpacing(8)
+        self.thumb_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.thumb_list.itemSelectionChanged.connect(self.onSelectionChanged)
+        self.thumb_list.itemDoubleClicked.connect(self.onItemDoubleClicked)
+
+        # Viewer area
+        viewer_layout = QVBoxLayout()
+        self.viewer_label = QLabel("No image")
+        self.viewer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.viewer_label.setMinimumSize(320, 240)
+
+        controls = QHBoxLayout()
+        self.prev_btn = PushButton("◀", self)
+        self.prev_btn.clicked.connect(self.showPrev)
+        self.next_btn = PushButton("▶", self)
+        self.next_btn.clicked.connect(self.showNext)
+
+        self.index_slider = QSlider(Qt.Orientation.Horizontal)
+        self.index_slider.setMinimum(0)
+        self.index_slider.setSingleStep(1)
+        self.index_slider.valueChanged.connect(self.onSliderMoved)
+
+        controls.addWidget(self.prev_btn)
+        controls.addWidget(self.index_slider)
+        controls.addWidget(self.next_btn)
+
+        viewer_layout.addWidget(self.viewer_label)
+        viewer_layout.addLayout(controls)
+
+        main.addWidget(self.thumb_list, 40)
+        main.addLayout(viewer_layout, 60)
+
+        root.addLayout(top)
+        root.addLayout(main)
+
+        self.setLayout(root)
         StyleSheet.HOME_INTERFACE.apply(self)
-        
+
+    # ---------- Folder / loading ----------
     def selectFolder(self):
         folder = QFileDialog.getExistingDirectory(
             self, "Select Folder", "",
             QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks
         )
-        
         if folder:
             self.current_directory = folder
             self.loadImages()
-            
+
     def loadImages(self):
-        # Clear previous images
-        for i in reversed(range(self.image_layout.count())):
-            self.image_layout.itemAt(i).widget().setParent(None)
-        
-        self.selected_images.clear()
-        
-        # Load all image files
-        image_extensions = ['*.png', '*.jpg', '*.jpeg']
-        image_files = []
-        for ext in image_extensions:
-            image_files.extend(glob.glob(os.path.join(self.current_directory, ext)))
-        
-        # Create thumbnails
-        for image_path in sorted(image_files):
-            thumbnail = ImageThumbnail(image_path)
-            thumbnail.clicked.connect(lambda checked, path=image_path: self.onImageSelected(path, checked))
-            self.image_layout.addWidget(thumbnail)
-            
-        # Add stretch to keep images left-aligned
-        self.image_layout.addStretch()
-        
-    def onImageSelected(self, image_path, is_selected):
-        if is_selected:
-            self.selected_images.add(image_path)
-        else:
-            self.selected_images.discard(image_path)
-            
-        self.delete_selected_btn.setEnabled(len(self.selected_images) > 0)
-        
-    def deleteSelected(self):
-        if not self.selected_images:
+        self.thumb_list.clear()
+        self.image_list = []
+        # common image extensions
+        extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp']
+        files = []
+        for ext in extensions:
+            files.extend(glob.glob(os.path.join(self.current_directory, ext)))
+        files = sorted(files)
+
+        for p in files:
+            item = QListWidgetItem()
+            qpix = QPixmap(p)
+            if not qpix or qpix.isNull():
+                icon = QIcon()
+            else:
+                icon = QIcon(qpix.scaled(320, 240, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            item.setIcon(icon)
+            item.setText(os.path.basename(p))
+            item.setData(Qt.ItemDataRole.UserRole, p)
+            item.setToolTip(p)
+            self.thumb_list.addItem(item)
+            self.image_list.append(p)
+
+        # slider range
+        self.index_slider.setMaximum(max(0, len(self.image_list) - 1))
+        if self.image_list:
+            self.showImageAt(0)
+        self.updateDeleteButtonState()
+
+    # ---------- Selection / view mode ----------
+    def onSelectionChanged(self):
+        selected = self.getSelectedImagePaths()
+        self.updateDeleteButtonState()
+        # If in 'Selected Images' view and there is selection, jump viewer to first selected
+        if self.view_mode.currentText() == 'Selected Images' and selected:
+            try:
+                idx = self.image_list.index(selected[0])
+                self.index_slider.blockSignals(True)
+                self.index_slider.setValue(idx)
+                self.index_slider.blockSignals(False)
+                self.showImageAt(idx)
+            except ValueError:
+                pass
+
+    def onItemDoubleClicked(self, item):
+        p = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            idx = self.image_list.index(p)
+            self.index_slider.setValue(idx)
+            self.showImageAt(idx)
+        except ValueError:
+            pass
+
+    def onViewModeChanged(self, _):
+        # If switched to Selected Images but none selected, disable viewer controls
+        self.updateDeleteButtonState()
+
+    def getSelectedImagePaths(self):
+        items = self.thumb_list.selectedItems()
+        return [it.data(Qt.ItemDataRole.UserRole) for it in items]
+
+    def updateDeleteButtonState(self):
+        self.delete_selected_btn.setEnabled(len(self.getSelectedImagePaths()) > 0)
+
+    # ---------- Viewer controls ----------
+    def showImageAt(self, index):
+        if not self.image_list:
+            self.viewer_label.setText('No image')
             return
-            
+        index = max(0, min(index, len(self.image_list) - 1))
+        path = self.image_list[index]
+        pix = QPixmap(path)
+        if pix and not pix.isNull():
+            scaled = pix.scaled(self.viewer_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.viewer_label.setPixmap(scaled)
+        else:
+            self.viewer_label.setText('Unable to load image')
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # refresh current image to fit new size
+        self.showImageAt(self.index_slider.value())
+
+    def showPrev(self):
+        v = max(0, self.index_slider.value() - 1)
+        self.index_slider.setValue(v)
+        self.showImageAt(v)
+
+    def showNext(self):
+        v = min(self.index_slider.maximum(), self.index_slider.value() + 1)
+        self.index_slider.setValue(v)
+        self.showImageAt(v)
+
+    def onSliderMoved(self, value):
+        self.showImageAt(value)
+
+    # ---------- Deletion logic ----------
+    def deleteSelected(self):
+        selected = self.getSelectedImagePaths()
+        if not selected:
+            return
         reply = QMessageBox.question(
             self, 'Confirm Deletion',
-            f'Are you sure you want to delete {len(self.selected_images)} selected items and their related files?',
+            f'Are you sure you want to delete {len(selected)} selected image(s) and their related files?',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            for image_path in self.selected_images:
-                self.deleteRelatedFiles(image_path)
-            
-            self.loadImages()  # Refresh the view
-            
-    def deleteRelatedFiles(self, image_path):
-        # Get the base name without extension
-        path = Path(image_path)
-        base_name = path.stem
-        
-        # Find the common part of the filename (e.g., "0001" from "rgb_0001.png")
-        # This assumes the base number is at the end of the filename
-        import re
-        number_match = re.search(r'\d+$', base_name)
-        if number_match:
-            common_part = number_match.group()
-            # Find all files in the directory with this number
-            directory = path.parent
-            for file_path in directory.glob(f'*{common_part}.*'):
-                try:
-                    os.remove(str(file_path))
-                except Exception as e:
-                    QMessageBox.warning(
-                        self, 'Deletion Error',
-                        f'Error deleting {file_path}: {str(e)}'
-                    )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Build set of identifiers to delete (trailing digits or full stem)
+        to_delete_ids = set()
+        for p in selected:
+            stem = Path(p).stem
+            m = re.search(r"(\d+)$", stem)
+            if m:
+                to_delete_ids.add(m.group(1))
+            else:
+                to_delete_ids.add(stem)
+
+        errors = []
+        deleted_files = 0
+        for file in Path(self.current_directory).iterdir():
+            name = file.stem
+            for ident in to_delete_ids:
+                if name.endswith(ident) or name == ident:
+                    try:
+                        file.unlink()
+                        deleted_files += 1
+                    except Exception as e:
+                        errors.append((str(file), str(e)))
+
+        # show summary
+        msg = f'Deleted {deleted_files} files.'
+        if errors:
+            msg += '\nSome files failed to delete:\n' + '\n'.join(f'{p}: {err}' for p, err in errors)
+        QMessageBox.information(self, 'Deletion Result', msg)
+
+        # reload
+        self.loadImages()
