@@ -1,120 +1,125 @@
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
-    QListWidget, QListWidgetItem, QSlider, QAbstractItemView, QComboBox, QApplication
+    QScrollArea, QApplication, QFrame, QComboBox
 )
-from qfluentwidgets import PushButton, MessageBox, StrongBodyLabel
-from PyQt6.QtGui import QPixmap, QIcon
+from PyQt6.QtGui import QPixmap
+from qfluentwidgets import (
+    PushButton, MessageBox, StrongBodyLabel, FlowLayout,
+    CardWidget, IconWidget, FluentIcon, SubtitleLabel,
+    TransparentToolButton
+)
 import os
 import glob
 from pathlib import Path
 import re
 from ..common.style_sheet import StyleSheet
+from ..components.image_card import ImageCard
 
 
 class DataManagementInterface(QWidget):
-    """A two-pane data manager: left is a thumbnail list, right is a slideshow viewer.
+    """Data manager that shows a large image viewer and grid of selectable image cards.
 
     Features:
     - Select folder to load images
-    - Thumbnail list with multi-selection (Ctrl/Shift)
-    - Viewer with prev/next and slider
-    - View mode: All images or Selected images
-    - Delete selected images and all related files that share the same identifier
+    - Grid of image cards with selection overlay and download badge
+    - Large viewer with prev/next navigation
+    - Click anywhere (viewer or grid) to select
+    - Delete selected images and related files
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName('dataManagementInterface')  # required by qfluentwidgets
+        self.setObjectName('dataManagementInterface')
 
         self.current_directory = ""
         self.image_list = []  # ordered list of image paths
-
+        self.current_index = -1
+        self.image_cards = []  # list of ImageCard widgets
+        
         self.initUI()
 
     def initUI(self):
         root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
-        # Top controls
+        # Top row with folder selection and actions
         top = QHBoxLayout()
         self.select_folder_btn = PushButton(self.tr("Select Folder"), self)
         self.select_folder_btn.clicked.connect(self.selectFolder)
-
-        self.view_mode = QComboBox()
-        self.view_mode.addItems(["All Images", "Selected Images"])
-        self.view_mode.currentIndexChanged.connect(self.onViewModeChanged)
-
-        # selected count label (updates when selection changes)
         self.selected_count = StrongBodyLabel(self.tr("Selected: 0"), self)
-
         self.delete_selected_btn = PushButton(self.tr("Delete Selected"), self)
+        self.delete_selected_btn.setIcon(FluentIcon.DELETE)
         self.delete_selected_btn.clicked.connect(self.deleteSelected)
         self.delete_selected_btn.setEnabled(False)
 
         top.addWidget(self.select_folder_btn)
-        top.addWidget(self.view_mode)
         top.addStretch()
         top.addWidget(self.selected_count)
         top.addWidget(self.delete_selected_btn)
 
-        # Main area: thumbnails on left, viewer on right
-        main = QHBoxLayout()
-
-        # Thumbnail list
-        self.thumb_list = QListWidget()
-        self.thumb_list.setObjectName('thumbnailList')
-        self.thumb_list.setViewMode(QListWidget.ViewMode.IconMode)
-        self.thumb_list.setIconSize(QSize(160, 120))
-        self.thumb_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.thumb_list.setMovement(QListWidget.Movement.Static)
-        self.thumb_list.setSpacing(8)
-        self.thumb_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        # custom click behavior: toggle selection on single click (no Ctrl required)
-        self.thumb_list.itemClicked.connect(self.onThumbClicked)
-        self.thumb_list.itemSelectionChanged.connect(self.onSelectionChanged)
-        self.thumb_list.itemDoubleClicked.connect(self.onItemDoubleClicked)
-
-        # Viewer area
-        viewer_layout = QVBoxLayout()
-        # clickable viewer label (click image to toggle selection)
-        class ClickableLabel(QLabel):
-            clicked = pyqtSignal()
-            def mousePressEvent(self, event):
-                super().mousePressEvent(event)
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self.clicked.emit()
-
-        self.viewer_label = ClickableLabel("No image")
-        self.viewer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.viewer_label.setMinimumSize(320, 240)
-        self.viewer_label.clicked.connect(self.toggleSelectCurrent)
-
-        controls = QHBoxLayout()
-        self.prev_btn = PushButton("◀", self)
-        self.prev_btn.clicked.connect(self.showPrev)
-        self.next_btn = PushButton("▶", self)
-        self.next_btn.clicked.connect(self.showNext)
-
-        self.index_slider = QSlider(Qt.Orientation.Horizontal)
-        self.index_slider.setMinimum(0)
-        self.index_slider.setSingleStep(1)
-        self.index_slider.valueChanged.connect(self.onSliderMoved)
-
-        controls.addWidget(self.prev_btn)
-        controls.addWidget(self.index_slider)
-        controls.addWidget(self.next_btn)
-
-        viewer_layout.addWidget(self.viewer_label)
-        viewer_layout.addLayout(controls)
-
-        main.addWidget(self.thumb_list, 40)
-        main.addLayout(viewer_layout, 60)
-
         root.addLayout(top)
-        root.addLayout(main)
 
+        # Image viewer area
+        viewer_frame = QFrame(self)
+        viewer_frame.setObjectName('imageViewerFrame')
+        viewer_frame.setMinimumHeight(300)
+        viewer_layout = QVBoxLayout(viewer_frame)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Viewer image (clickable)
+        self.viewer_label = QLabel("No image")
+        self.viewer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.viewer_label.setMinimumHeight(240)
+        self.viewer_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.viewer_label.mouseReleaseEvent = self._on_viewer_clicked
+
+        # Navigation controls below viewer
+        nav = QHBoxLayout()
+        self.prev_btn = TransparentToolButton(FluentIcon.LEFT_ARROW, self)
+        self.prev_btn.clicked.connect(self.showPrev)
+        self.next_btn = TransparentToolButton(FluentIcon.RIGHT_ARROW, self)
+        self.next_btn.clicked.connect(self.showNext)
+        
+        # Current image indicator
+        self.position_label = SubtitleLabel("0 / 0")
+        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        nav.addStretch()
+        nav.addWidget(self.prev_btn)
+        nav.addWidget(self.position_label)
+        nav.addWidget(self.next_btn)
+        nav.addStretch()
+
+        viewer_layout.addWidget(self.viewer_label, 1)
+        viewer_layout.addLayout(nav)
+
+        root.addWidget(viewer_frame)
+
+        # Scrollable grid of image cards
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        scroll_content = QWidget(scroll)
+        self.flow_layout = FlowLayout(scroll_content)
+        self.flow_layout.setHorizontalSpacing(12)
+        self.flow_layout.setVerticalSpacing(12)
+        scroll_content.setLayout(self.flow_layout)
+        scroll.setWidget(scroll_content)
+
+        root.addWidget(scroll, 1)
         self.setLayout(root)
         StyleSheet.HOME_INTERFACE.apply(self)
+
+    def _on_viewer_clicked(self, event):
+        """Toggle selection when clicking the viewer image."""
+        if event.button() == Qt.MouseButton.LeftButton and self.current_index >= 0:
+            card = self.image_cards[self.current_index]
+            card.setSelected(not card.isSelected())
+            self.updateDeleteButtonState()
 
     # ---------- Folder / loading ----------
     def selectFolder(self):
@@ -163,82 +168,91 @@ class DataManagementInterface(QWidget):
         return QIcon(thumb)
 
     def loadImages(self):
-        self.thumb_list.clear()
-        self.image_list = []
-        # common image extensions
+        """Load images from current_directory into the grid and viewer."""
+        # Clear existing cards and paths
+        for card in self.image_cards:
+            self.flow_layout.removeWidget(card)
+            card.deleteLater()
+        self.image_cards.clear()
+        self.image_list.clear()
+        self.current_index = -1
+
+        # Find image files
         extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp']
         files = []
         for ext in extensions:
             files.extend(glob.glob(os.path.join(self.current_directory, ext)))
         files = sorted(files)
 
-        for p in files:
-            item = QListWidgetItem()
-            # create icon without badge initially
-            icon = self._create_item_icon(p, selected=False)
-            item.setIcon(icon)
-            item.setText(os.path.basename(p))
-            item.setData(Qt.ItemDataRole.UserRole, p)
-            item.setToolTip(p)
-            self.thumb_list.addItem(item)
-            self.image_list.append(p)
+        # Create cards
+        for path in files:
+            card = ImageCard(path, self)
+            card.clicked.connect(lambda p=path: self.showImage(p))
+            card.selectionChanged.connect(self.updateDeleteButtonState)
+            self.flow_layout.addWidget(card)
+            self.image_cards.append(card)
+            self.image_list.append(path)
 
-        # slider range
-        self.index_slider.setMaximum(max(0, len(self.image_list) - 1))
+        # Show first image if any loaded
         if self.image_list:
-            self.showImageAt(0)
-        # ensure visuals reflect selection state (none at load)
-        self.refreshThumbnailVisuals()
+            self.showImage(self.image_list[0])
+        else:
+            self.viewer_label.setText("No images")
+            self.position_label.setText("0 / 0")
+
         self.updateDeleteButtonState()
 
-    def refreshThumbnailVisuals(self):
-        """Refresh thumbnail icons to show selection badges and a subtle background for selected items."""
-        for i in range(self.thumb_list.count()):
-            it = self.thumb_list.item(i)
-            path = it.data(Qt.ItemDataRole.UserRole)
-            selected = it.isSelected()
-            it.setIcon(self._create_item_icon(path, selected=selected))
-            # Optional: set a property for QSS to style selected card background if desired
-            # We can setData with a role or set a custom data key; QListWidget supports selected styling
-        # force repaint
-        self.thumb_list.viewport().update()
-
-    # ---------- Selection / view mode ----------
-    def onSelectionChanged(self):
-        selected = self.getSelectedImagePaths()
-        self.updateDeleteButtonState()
-        # refresh visuals so selected thumbnails show badges
+    def showImage(self, path):
+        """Show an image in the viewer and update current index."""
         try:
-            self.refreshThumbnailVisuals()
-        except Exception:
-            pass
-        # If in 'Selected Images' view and there is selection, jump viewer to first selected
-        if self.view_mode.currentText() == 'Selected Images' and selected:
-            try:
-                idx = self.image_list.index(selected[0])
-                self.index_slider.blockSignals(True)
-                self.index_slider.setValue(idx)
-                self.index_slider.blockSignals(False)
-                self.showImageAt(idx)
-            except ValueError:
-                pass
-
-    def onItemDoubleClicked(self, item):
-        p = item.data(Qt.ItemDataRole.UserRole)
-        try:
-            idx = self.image_list.index(p)
-            self.index_slider.setValue(idx)
-            self.showImageAt(idx)
+            idx = self.image_list.index(path)
         except ValueError:
-            pass
+            return
 
-    def onViewModeChanged(self, _):
-        # If switched to Selected Images but none selected, disable viewer controls
-        self.updateDeleteButtonState()
+        self.current_index = idx
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            self.viewer_label.setText("Failed to load image")
+            return
+
+        scaled = pixmap.scaled(
+            self.viewer_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.viewer_label.setPixmap(scaled)
+        self.position_label.setText(f"{idx + 1} / {len(self.image_list)}")
+
+    def showNext(self):
+        """Show the next image in the list."""
+        if not self.image_list:
+            return
+        next_idx = (self.current_index + 1) % len(self.image_list)
+        self.showImage(self.image_list[next_idx])
+
+    def showPrev(self):
+        """Show the previous image in the list."""
+        if not self.image_list:
+            return
+        prev_idx = (self.current_index - 1) % len(self.image_list)
+        self.showImage(self.image_list[prev_idx])
 
     def getSelectedImagePaths(self):
-        items = self.thumb_list.selectedItems()
-        return [it.data(Qt.ItemDataRole.UserRole) for it in items]
+        """Get paths of all selected images."""
+        return [card.image_path for card in self.image_cards if card.isSelected()]
+
+    def updateDeleteButtonState(self):
+        """Update delete button and selection count label."""
+        selected = self.getSelectedImagePaths()
+        count = len(selected)
+        self.delete_selected_btn.setEnabled(count > 0)
+        self.selected_count.setText(self.tr(f"Selected: {count}"))
+
+    def resizeEvent(self, e):
+        """Handle resize - update current image scaling."""
+        super().resizeEvent(e)
+        if self.current_index >= 0:
+            self.showImage(self.image_list[self.current_index])
 
     def updateDeleteButtonState(self):
         count = len(self.getSelectedImagePaths())
