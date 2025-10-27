@@ -1,6 +1,6 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QColor
-from PyQt6.QtWidgets import QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QFrame
 
 from qfluentwidgets import CardWidget, IconWidget, FluentIcon
 from ..common.style_sheet import StyleSheet
@@ -19,19 +19,48 @@ class ImageCard(CardWidget):
         
         # Main layout
         self.vBoxLayout = QVBoxLayout(self)
-        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
-        self.vBoxLayout.setSpacing(0)
+        self.vBoxLayout.setContentsMargins(8, 8, 8, 8)
+        self.vBoxLayout.setSpacing(4)
         
-        # Image label
-        self.imageLabel = QLabel(self)
-        self.imageLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.imageLabel.setMinimumSize(200, 150)  # adjust as needed
-        self.vBoxLayout.addWidget(self.imageLabel)
+        # Image container for centering
+        self.image_container = QFrame(self)
+        self.image_container.setFixedSize(320, 240)
+        self.image_container.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a1a;
+                border-radius: 4px;
+            }
+        """)
         
-        # Download icon overlay (only shown when selected)
-        self.downloadIcon = IconWidget(FluentIcon.DOWNLOAD, self)
-        self.downloadIcon.setFixedSize(32, 32)
-        self.downloadIcon.hide()
+        # Image label - no layout, we'll position it manually
+        self.imageLabel = QLabel(self.image_container)
+        self.imageLabel.setStyleSheet("background: transparent;")
+        
+        # File name label
+        self.nameLabel = QLabel(self)
+        self.nameLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.nameLabel.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 13px;
+                padding: 4px;
+                background-color: transparent;
+            }
+        """)
+        import os
+        self.nameLabel.setText(os.path.basename(image_path))
+        self.nameLabel.setFixedWidth(320)  # Match image width
+        self.nameLabel.setWordWrap(True)  # Enable word wrap for long names
+        
+        self.vBoxLayout.addWidget(self.image_container)
+        self.vBoxLayout.addWidget(self.nameLabel)
+        
+        # Delete icon overlay (only shown when selected)
+        self.deleteIcon = IconWidget(FluentIcon.DELETE, self)
+        self.deleteIcon.setFixedSize(32, 32)
+        icon_color = QColor(255, 255, 255)  # White icon
+        self.deleteIcon.setIcon(FluentIcon.DELETE)
+        self.deleteIcon.hide()
         
         # Load and display the image
         self.loadImage()
@@ -47,18 +76,29 @@ class ImageCard(CardWidget):
         """Load and scale the image to fit the card."""
         pixmap = QPixmap(self.image_path)
         if not pixmap.isNull():
+            # Get the container size (parent of imageLabel)
+            container_size = self.imageLabel.parent().size()
+            
+            # Scale image to fit container
             scaled = pixmap.scaled(
-                self.imageLabel.size(),
+                container_size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
+            
+            # Calculate position to center the image
+            x = (container_size.width() - scaled.width()) // 2
+            y = (container_size.height() - scaled.height()) // 2
+            
+            # Set geometry to position the image label
+            self.imageLabel.setGeometry(x, y, scaled.width(), scaled.height())
             self.imageLabel.setPixmap(scaled)
-            # Position the download icon in the bottom right
-            if self.downloadIcon:
-                self.downloadIcon.move(
-                    self.width() - self.downloadIcon.width() - 8,
-                    self.height() - self.downloadIcon.height() - 8
-                )
+            
+            # Position the delete icon
+            if self.deleteIcon:
+                self.deleteIcon.move(
+                    (self.width() - self.deleteIcon.width()) // 2,
+                    (self.height() - self.deleteIcon.height()) // 2)
 
     def setSelected(self, selected: bool):
         """Set the selection state and update visuals."""
@@ -66,7 +106,7 @@ class ImageCard(CardWidget):
             return
             
         self._selected = selected
-        self.downloadIcon.setVisible(selected)
+        self.deleteIcon.setVisible(selected)
         self.update()  # force repaint for selection effect
         self.selectionChanged.emit(selected)
 

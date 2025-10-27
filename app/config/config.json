@@ -10,6 +10,15 @@
         "Language": "Auto",
         "MicaEnabled": true
     },
+    "QFluentWidgets": {
+        "FontFamilies": [
+            "Segoe UI",
+            "Microsoft YaHei",
+            "PingFang SC"
+        ],
+        "ThemeColor": "#ff009faa",
+        "ThemeMode": "Auto"
+    },
     "Folders": {
         "Gallery": "D:/projects/pyqt6/project/app/view/resource/gallery",
         "LocalMusic": []
@@ -21,9 +30,5 @@
     },
     "Models": {
         "Model Type": "yolov8"
-    },
-    "QFluentWidgets": {
-        "ThemeColor": "#ff009faa",
-        "ThemeMode": "Dark"
     }
 }
